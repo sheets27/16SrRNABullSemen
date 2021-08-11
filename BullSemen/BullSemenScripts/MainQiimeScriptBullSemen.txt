@@ -1,0 +1,316 @@
+#This project was done on Purdue University's computing clusters. Therefore, some parts of code may not pertain to your local machine#
+
+cd $RCAC_SCRATCH
+cd path/to/your/files
+
+pwd
+
+#step 2, Load Modules
+
+echo "loading bioinfo"
+module load bioinfo
+
+echo "loading qiime2-2020.2"
+module load Qiime/2-2020.2
+
+#step 3, Run the code you want
+
+echo "Start time"
+date +"%d %B %Y %H:%M:%S"
+
+echo "initiating For_Dr_K pipeline"
+
+wget \
+  -O "silva-132-99-515-806-nb-classifier.qza" \
+  "https://data.qiime2.org/2020.2/common/silva-132-99-515-806-nb-classifier.qza"
+
+#Paired-end read analysis commands
+
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path For_Dr_K_samples.files \
+  --input-format PairedEndFastqManifestPhred33V2 \
+  --output-path demux.qza
+echo "Demultiplex"
+
+qiime demux summarize \
+  --i-data demux.qza \
+  --o-visualization demux.qzv
+
+#De-noise. Error Corrections.
+
+echo "dada2"
+
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs demux.qza \
+  --p-trim-left-f 12 \
+  --p-trim-left-r 5 \
+  --p-trunc-len-f 251 \
+  --p-trunc-len-r 230 \
+  --o-table table.qza \
+  --o-representative-sequences rep-seqs.qza \
+  --o-denoising-stats denoising-stats.qza
+
+#Convert .qza to .qzv format
+
+qiime feature-table summarize \
+  --i-table table.qza \
+  --o-visualization table.qzv \
+  --m-sample-metadata-file For_Dr_K_metadata.tsv
+
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+qiime metadata tabulate \
+  --m-input-file denoising-stats.qza \
+  --o-visualization denoising-stats.qzv
+
+echo "Create a phylogenetic tree. (Phylogenetic method)"
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+
+#Rarefaction to check on sampling depth
+
+qiime diversity alpha-rarefaction \
+  --i-table table.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 15000 \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization alpha-rarefaction.qzv
+
+#Calculate diversity metrics. You will need to designate a sampling depth. You $
+
+echo "core-metrics-phylogenetic"
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 9351 \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --output-dir core-metrics-results
+
+#Perform qiime feature-classifier
+
+echo "feature-classifier & metadata tabulate"
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-132-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file taxonomy.qza \
+  --o-visualization taxonomy.qzv
+
+#Obtain taxa barplot
+
+echo "taxa barplot"
+
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization taxa-bar-plots.qzv
+
+#Calculate qiime diversity alpha-group-significance
+
+echo "diversity alpha measures"
+
+qiime diversity alpha \
+  --i-table core-metrics-results/rarefied_table.qza \
+  --p-metric chao1 \
+  --o-alpha-diversity core-metrics-results/chao1_vector.qza
+
+qiime diversity alpha \
+  --i-table core-metrics-results/rarefied_table.qza \
+  --p-metric simpson \
+  --o-alpha-diversity core-metrics-results/simpson_vector.qza
+
+qiime diversity alpha \
+  --i-table core-metrics-results/rarefied_table.qza \
+  --p-metric simpson_e \
+  --o-alpha-diversity core-metrics-results/simpson_e_vector.qza
+
+qiime diversity alpha \
+  --i-table core-metrics-results/rarefied_table.qza \
+  --p-metric observed_otus \
+  --o-alpha-diversity core-metrics-results/observed_otus_vector.qza
+
+qiime diversity alpha \
+  --i-table core-metrics-results/rarefied_table.qza \
+  --p-metric shannon \
+  --o-alpha-diversity core-metrics-results/shannon_vector.qza
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/chao1_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/chao1-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/simpson_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/simpson-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/simpson_e_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/simpson-e-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/evenness-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/shannon_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/shannon-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/observed_otus_vector.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --o-visualization core-metrics-results/observed-otus-group-significance.qzv
+
+#Calculate qiime diversity beta-group-significance
+
+echo "beta-group-significance"
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Sperm-Quality \
+  --o-visualization core-metrics-results/bray-curtis-Sperm-Quality-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Age-Months \
+  --o-visualization core-metrics-results/bray-curtis-Age-Months-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Breed \
+  --o-visualization core-metrics-results/bray-curtis-Breed-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Owner \
+  --o-visualization core-metrics-results/bray-curtis-Owner-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/jaccard_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Sperm-Quality \
+  --o-visualization core-metrics-results/jaccard-Sperm-Quality-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/jaccard_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Age-Months \
+  --o-visualization core-metrics-results/jaccard-Age-Months-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/jaccard_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Breed \
+  --o-visualization core-metrics-results/jaccard-Breed-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/jaccard_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Owner \
+  --o-visualization core-metrics-results/jaccard-Owner-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Sperm-Quality \
+  --o-visualization core-metrics-results/unweighted-unifrac-Sperm-Quality-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Age-Months \
+  --o-visualization core-metrics-results/unweighted-unifrac-Age-Months-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Breed \
+  --o-visualization core-metrics-results/unweighted-unifrac-Breed-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Owner \
+  --o-visualization core-metrics-results/unweighted-unifrac-Owner-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/weighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Sperm-Quality \
+  --o-visualization core-metrics-results/weighted-unifrac-Sperm-Quality-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/weighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Age-Months \
+  --o-visualization core-metrics-results/weighted-unifrac-Age-Months-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/weighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Breed \
+  --o-visualization core-metrics-results/weighted-unifrac-Breed-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/weighted_unifrac_distance_matrix.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Owner \
+  --o-visualization core-metrics-results/weighted-unifrac-Owner-significance.qzv \
+  --p-pairwise
+
+#Find Sig Taxa in DESeq#
+
+qiime composition add-pseudocount \
+  --i-table table.qza \
+  --o-composition-table table_comp.qza
+
+qiime composition ancom \
+  --i-table table_comp.qza \
+  --m-metadata-file For_Dr_K_metadata.tsv \
+  --m-metadata-column Sperm-Quality \
+  --o-visualization ancom_SpermQuality.qzv
+
+echo "End time"
+date +"%d %B %Y %H:%M:%S"
+
+#to run: sbatch qiime_pipeline.slurm

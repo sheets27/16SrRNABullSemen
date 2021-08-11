@@ -1,0 +1,109 @@
+# This is a demo for running the co-occurrence analysis much, much faster
+
+#make sure you have these libraries
+library(Hmisc)
+library(plyr)
+library(reshape2)
+library(igraph)
+library(fdrtool)
+library(GGally)
+library(intergraph)
+library(qiime2R)
+library(ggplot2)
+
+# this is the data
+setwd("C:/Users/Tessa/Desktop/For_Dr_Koziol/R/Needed/")
+
+####################################################
+#I editted here to make it so you don't have to edit the metadata file to remove the second line. 
+#Use the same metadata file as you used in QIIME2
+####################################################
+
+metadata <- read.delim("For_Dr_K_metadata.tsv", sep = "\t", header = T, quote = "", stringsAsFactors = F)
+metadata <- metadata2[-1,]
+str(metadata)
+
+ASVs <- read_qza("table.qza")
+ASV_table <- as.data.frame(ASVs$data)
+
+#####################################################################
+#Create a key that matches each ASV string to a new ASV number#
+
+ASV_table$ASVnos <- paste0("ASV", 1:nrow(ASV_table))
+ASV_table$ASVstring <- rownames(ASV_table)
+rownames(ASV_table) <- ASV_table$ASVnos
+ASVkey <- ASV_table[, (ncol(ASV_table)-1):ncol(ASV_table)]
+ASV_table <- ASV_table[,-(ncol(ASV_table)-1):-ncol(ASV_table)]
+######################################################################
+
+dataset <- as.data.frame(t(ASV_table))
+dataset <- merge(metadata, dataset, by.x = "sample.ID", by.y = 0)
+datasetn<-dataset
+datasetn[datasetn==0]<-NA
+# we are going to create a network per treatment
+head(dataset[,1:10])
+head(datasetn[,1:10])
+
+treatments<-as.vector(unique(dataset$Sperm.Quality))
+treatments
+
+final_results<-data.frame()
+
+for(i in 1:length(treatments)){
+	#subset the data for a particular treatment
+	temp<-subset(dataset, Sperm.Quality==treatments[i])
+	tempn<-subset(datasetn, Sperm.Quality==treatments[i])
+	# making an object that has all the results in it (both rho and P values)
+	results<-rcorr(as.matrix(temp[,-c(1:6)]),type="spearman")
+	resultsn<-rcorr(as.matrix(tempn[,-c(1:6)]),type="spearman")
+	#make two seperate objects for p-value and correlation coefficients
+	rhos<-results$r
+	ps<-results$P
+	ns<-resultsn$n
+	# going to melt these objects to 'long form' where the first two columns make up the pairs of OTUs, I am also removing NA's as they are self-comparisons, not enough data, other bad stuff
+	ps_melt<-na.omit(melt(ps))
+	#creating a qvalue based on FDR
+	ps_melt$qval<-p.adjust(ps_melt$value, method="BH")
+	#making column names more relevant
+	
+	names(ps_melt)[3]<-"pval"
+	# if you are of the opinion that it is a good idea to subset your network based on adjusted P-values (qval in this case), you can then subset here
+	ps_sub<-subset(ps_melt, qval < 0.05)
+	# now melting the rhos, note the similarity between ps_melt and rhos_melt
+	rhos_melt<-na.omit(melt(rhos))
+	names(rhos_melt)[3]<-"rho"
+	# now melting the ns
+	ns_melt<-(melt(ns))
+	names(ns_melt)[3]<-"n"
+	#merging together and remove negative rhos
+	merged<-merge(ps_sub,rhos_melt,by=c("Var1","Var2"))
+	if (treatments[i]=="S") {
+	  merged<-merge(merged,subset(ns_melt, n > 14),by=c("Var1","Var2"))
+	}   else if (treatments[i]=="U") {
+	  merged<-merge(merged,subset(ns_melt, n > 5),by=c("Var1","Var2"))
+	}   else
+	      print("Somethings wrong with your treatment designations. Please Check!!")
+	merged$Sperm.Quality<-treatments[i]
+	final_results<-rbind(final_results, merged)
+	print(paste("finished ",treatments[i],sep=""))
+}
+
+##################################################
+#Making scatterplots
+#
+#Make sure your r value is for the treatment group for which you draw these scatterplots
+
+S_ASVs<-subset(dataset, Sperm.Quality==treatments[1])
+U_ASVs<-subset(dataset, Sperm.Quality==treatments[2])
+
+colnames(U_ASVs[1:10])
+head(final_results)
+
+ggplot(U_ASVs, aes(x = ASV70, y = ASV210)) +
+  geom_point()
+
+ggplot(U_ASVs, aes(ASV25, ASV26)) +
+  geom_point()
+
+ggplot(U_ASVs, aes(ASV333, ASV48)) +
+  geom_point()
